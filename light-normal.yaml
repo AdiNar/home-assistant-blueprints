@@ -1,0 +1,194 @@
+blueprint:
+  name: Normal Light Manager
+  description: Manages lighting based on motion, time, occupancy, and dynamic sun-mapped levels.
+  domain: automation
+  input:
+    normal_lights:
+      name: Lights
+      selector:
+        target:
+          entity:
+            domain: light
+    normal_brightness:
+      name: Brightness Level (Normal)
+      description: Enter 1-100 or 'auto'.
+      default: auto
+    normal_temp:
+      name: Color Temp Kelvin (Normal)
+      description: Enter value or 'auto'.
+      default: auto
+    ambient_brightness:
+      name: Brightness Level (Ambient)
+      default: 0
+    ambient_temp:
+      name: Color Temp Kelvin (Ambient)
+      default: auto
+    motion_sensors:
+      name: Motion Sensors (Optional)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: true
+    timeout:
+      name: Timeout (Ambient / Turn Off)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+    auto_min_brightness:
+      name: Auto Mode - Min Brightness (%)
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 100
+    auto_max_brightness:
+      name: Auto Mode - Max Brightness (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+    auto_min_temp:
+      name: Auto Mode - Min Kelvin
+      default: 2700
+      selector:
+        number:
+          min: 1000
+          max: 8000
+    auto_max_temp:
+      name: Auto Mode - Max Kelvin
+      default: 5500
+      selector:
+        number:
+          min: 1000
+          max: 8000
+    always_on:
+      name: Operate 24/7
+      default: true
+      selector:
+        boolean:
+    time_from:
+      name: Start Time
+      default: "00:00:00"
+      selector:
+        time:
+    time_to:
+      name: End Time
+      default: "00:00:00"
+      selector:
+        time:
+    person_required:
+      name: Require presence?
+      default: true
+      selector:
+        boolean:
+    person_entity:
+      name: Presence Entity
+      default: zone.home
+      selector:
+        entity:
+          domain: [zone, person]
+    override_entities:
+      name: Override Entities (Emergency switches)
+      description: If any of these are ON, normal logic is ignored.
+      default: []
+      selector:
+        entity:
+          domain: [input_boolean, switch]
+          multiple: true
+    transition_time:
+      name: Transition Time (s)
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 60
+
+mode: restart
+
+variables:
+  min_b: !input auto_min_brightness
+  max_b: !input auto_max_brightness
+  min_t: !input auto_min_temp
+  max_t: !input auto_max_temp
+  sun_elev: "{{ state_attr('sun.sun', 'elevation') | float(0) }}"
+  elev_pct: "{{ ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 }}"
+  auto_bright: "{{ (min_b + elev_pct * (max_b - min_b)) | int }}"
+  auto_temp: "{{ (min_t + elev_pct * (max_t - min_t)) | int }}"
+  
+  is_overridden: "{{ expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+  person_home: "{{ not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] }}"
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "on"
+    id: "motion_on"
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "off"
+    for:
+      minutes: !input timeout
+    id: "motion_off"
+  - platform: time
+    at: !input time_from
+    id: "time_from"
+  - platform: time
+    at: !input time_to
+    id: "time_to"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "time_to"
+          - condition: template
+            value_template: "{{ not !input always_on and not is_overridden }}"
+        sequence:
+          - service: light.turn_off
+            target: !input normal_lights
+            data:
+              transition: !input transition_time
+      - conditions:
+          - condition: trigger
+            id: "motion_on"
+          - condition: template
+            value_template: "{{ not is_overridden and ( !input always_on or now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta ) and person_home }}"
+        sequence:
+          - service: light.turn_on
+            target: !input normal_lights
+            data:
+              brightness_pct: "{{ auto_bright if !input normal_brightness == 'auto' else !input normal_brightness | int }}"
+              color_temp_kelvin: "{{ auto_temp if !input normal_temp == 'auto' else !input normal_temp | int }}"
+              transition: !input transition_time
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "motion_off"
+              - condition: trigger
+                id: "time_from"
+          - condition: template
+            value_template: "{{ not is_overridden and ( !input always_on or now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta ) and person_home }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ (!input ambient_brightness == 'auto' and auto_bright == 0) or !input ambient_brightness | int == 0 }}"
+                sequence:
+                  - service: light.turn_off
+                    target: !input normal_lights
+                    data:
+                      transition: !input transition_time
+            default:
+              - service: light.turn_on
+                target: !input normal_lights
+                data:
+                  brightness_pct: "{{ auto_bright if !input ambient_brightness == 'auto' else !input ambient_brightness | int }}"
+                  color_temp_kelvin: "{{ auto_temp if !input ambient_temp == 'auto' else !input ambient_temp | int }}"
+                  transition: !input transition_time

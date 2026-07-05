@@ -1,0 +1,62 @@
+blueprint:
+  name: Emergency Light Manager
+  description: Forces lights to a specific state when an emergency switch is toggled.
+  domain: automation
+  input:
+    emergency_lights:
+      name: Emergency Lights
+      selector:
+        target:
+          entity:
+            domain: light
+    emergency_button:
+      name: Emergency Trigger (Switch/Button)
+      selector:
+        entity:
+          domain: [input_boolean, switch, button]
+    emergency_brightness:
+      name: Brightness (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+    emergency_temp:
+      name: Color Temp Kelvin
+      default: 6500
+      selector:
+        number:
+          min: 1000
+          max: 8000
+    transition_time:
+      name: Transition Time (s)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 60
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input emergency_button
+    id: "trigger"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state == 'off' }}"
+        sequence:
+          - service: light.turn_off
+            target: !input emergency_lights
+            data:
+              transition: !input transition_time
+    default:
+      - service: light.turn_on
+        target: !input emergency_lights
+        data:
+          brightness_pct: !input emergency_brightness
+          color_temp_kelvin: !input emergency_temp
+          transition: !input transition_time
