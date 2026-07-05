@@ -114,6 +114,11 @@ blueprint:
 mode: restart
 
 variables:
+  # Map inputs to variables first
+  in_override_entities: !input override_entities
+  in_person_req: !input person_required
+  in_person_ent: !input person_entity
+
   min_b: !input auto_min_brightness
   max_b: !input auto_max_brightness
   min_t: !input auto_min_temp
