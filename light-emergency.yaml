@@ -4,9 +4,11 @@ blueprint:
   domain: automation
   input:
     emergency_lights:
-      name: Emergency Lights
+      name: Lights
       selector:
-        target: {}
+        target:
+          entity:
+            domain: light
     emergency_button:
       name: Emergency Trigger (Switch/Button)
       selector:

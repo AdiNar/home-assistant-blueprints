@@ -4,9 +4,11 @@ blueprint:
   domain: automation
   input:
     normal_lights:
-      name: Lights or Area
+      name: Lights
       selector:
-        target: {}
+        target:
+          entity:
+            domain: light
     normal_brightness:
       name: Brightness Level (Normal)
       default: auto
