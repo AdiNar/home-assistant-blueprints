@@ -6,9 +6,7 @@ blueprint:
     emergency_lights:
       name: Emergency Lights
       selector:
-        target:
-          entity:
-            domain: light
+        target: {}
     emergency_button:
       name: Emergency Trigger (Switch/Button)
       selector:

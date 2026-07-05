@@ -4,18 +4,14 @@ blueprint:
   domain: automation
   input:
     normal_lights:
-      name: Lights
+      name: Lights or Area
       selector:
-        target:
-          entity:
-            domain: light
+        target: {}
     normal_brightness:
       name: Brightness Level (Normal)
-      description: Enter 1-100 or 'auto'.
       default: auto
     normal_temp:
       name: Color Temp Kelvin (Normal)
-      description: Enter value or 'auto'.
       default: auto
     ambient_brightness:
       name: Brightness Level (Ambient)
@@ -24,14 +20,12 @@ blueprint:
       name: Color Temp Kelvin (Ambient)
       default: auto
     motion_sensors:
-      name: Motion Sensors (Optional)
+      name: Motion/Occupancy Sensors (Optional)
       default: []
       selector:
         entity:
           domain: binary_sensor
-          device_class:
-            - motion
-            - occupancy
+          device_class: [motion, occupancy]
           multiple: true
     timeout:
       name: Timeout (Ambient / Turn Off)
@@ -97,7 +91,6 @@ blueprint:
           domain: [zone, person]
     override_entities:
       name: Override Entities (Emergency switches)
-      description: If any of these are ON, normal logic is ignored.
       default: []
       selector:
         entity:
@@ -112,24 +105,6 @@ blueprint:
           max: 60
 
 mode: restart
-
-variables:
-  # Map inputs to variables first
-  in_override_entities: !input override_entities
-  in_person_req: !input person_required
-  in_person_ent: !input person_entity
-
-  min_b: !input auto_min_brightness
-  max_b: !input auto_max_brightness
-  min_t: !input auto_min_temp
-  max_t: !input auto_max_temp
-  sun_elev: "{{ state_attr('sun.sun', 'elevation') | float(0) }}"
-  elev_pct: "{{ ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 }}"
-  auto_bright: "{{ (min_b + elev_pct * (max_b - min_b)) | int }}"
-  auto_temp: "{{ (min_t + elev_pct * (max_t - min_t)) | int }}"
-  
-  is_overridden: "{{ expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
-  person_home: "{{ not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] }}"
 
 trigger:
   - platform: state
@@ -150,6 +125,15 @@ trigger:
     id: "time_to"
 
 action:
+  - variables:
+      is_overridden: "{{ expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+      person_home: "{{ not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] }}"
+      sun_elev: "{{ state_attr('sun.sun', 'elevation') | float(0) }}"
+      elev_pct: "{{ ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 }}"
+      auto_b: "{{ (!input auto_min_brightness | int + elev_pct * (!input auto_max_brightness | int - !input auto_min_brightness | int)) | int }}"
+      auto_t: "{{ (!input auto_min_temp | int + elev_pct * (!input auto_max_temp | int - !input auto_min_temp | int)) | int }}"
+      is_time: "{{ !input always_on or (now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta) }}"
+
   - choose:
       - conditions:
           - condition: trigger
@@ -161,18 +145,20 @@ action:
             target: !input normal_lights
             data:
               transition: !input transition_time
+      
       - conditions:
           - condition: trigger
             id: "motion_on"
           - condition: template
-            value_template: "{{ not is_overridden and ( !input always_on or now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta ) and person_home }}"
+            value_template: "{{ not is_overridden and is_time and person_home }}"
         sequence:
           - service: light.turn_on
             target: !input normal_lights
             data:
-              brightness_pct: "{{ auto_bright if !input normal_brightness == 'auto' else !input normal_brightness | int }}"
-              color_temp_kelvin: "{{ auto_temp if !input normal_temp == 'auto' else !input normal_temp | int }}"
+              brightness_pct: "{{ auto_b if !input normal_brightness == 'auto' else !input normal_brightness | int }}"
+              color_temp_kelvin: "{{ auto_t if !input normal_temp == 'auto' else !input normal_temp | int }}"
               transition: !input transition_time
+
       - conditions:
           - condition: or
             conditions:
@@ -181,12 +167,12 @@ action:
               - condition: trigger
                 id: "time_from"
           - condition: template
-            value_template: "{{ not is_overridden and ( !input always_on or now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta ) and person_home }}"
+            value_template: "{{ not is_overridden and is_time and person_home }}"
         sequence:
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ (!input ambient_brightness == 'auto' and auto_bright == 0) or !input ambient_brightness | int == 0 }}"
+                    value_template: "{{ (!input ambient_brightness == 'auto' and auto_b == 0) or !input ambient_brightness | int == 0 }}"
                 sequence:
                   - service: light.turn_off
                     target: !input normal_lights
@@ -196,6 +182,6 @@ action:
               - service: light.turn_on
                 target: !input normal_lights
                 data:
-                  brightness_pct: "{{ auto_bright if !input ambient_brightness == 'auto' else !input ambient_brightness | int }}"
-                  color_temp_kelvin: "{{ auto_temp if !input ambient_temp == 'auto' else !input ambient_temp | int }}"
+                  brightness_pct: "{{ auto_b if !input ambient_brightness == 'auto' else !input ambient_brightness | int }}"
+                  color_temp_kelvin: "{{ auto_t if !input ambient_temp == 'auto' else !input ambient_temp | int }}"
                   transition: !input transition_time
