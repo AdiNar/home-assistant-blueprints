@@ -1,6 +1,6 @@
 blueprint:
   name: Normal Light Manager
-  description: Manages lighting based on motion, time, occupancy, and dynamic sun-mapped levels.
+  description: Intelligent lighting management with motion, presence, ambient mode, and sun-mapped dynamic levels.
   domain: automation
   input:
     normal_lights:
@@ -10,19 +10,19 @@ blueprint:
           entity:
             domain: light
     normal_brightness:
-      name: Brightness Level (Normal)
+      name: Brightness (Normal)
       default: auto
     normal_temp:
-      name: Color Temp Kelvin (Normal)
+      name: Color Temp (Kelvin)
       default: auto
     ambient_brightness:
-      name: Brightness Level (Ambient)
+      name: Brightness (Ambient)
       default: 0
     ambient_temp:
-      name: Color Temp Kelvin (Ambient)
+      name: Color Temp (Kelvin Ambient)
       default: auto
     motion_sensors:
-      name: Motion/Occupancy Sensors (Optional)
+      name: Motion/Occupancy Sensors
       default: []
       selector:
         entity:
@@ -30,67 +30,44 @@ blueprint:
           device_class: [motion, occupancy]
           multiple: true
     timeout:
-      name: Timeout (Ambient / Turn Off)
+      name: Timeout (minutes)
       default: 5
       selector:
         number:
           min: 1
           max: 1440
-          unit_of_measurement: min
     auto_min_brightness:
-      name: Auto Mode - Min Brightness (%)
+      name: Min Brightness (%)
       default: 30
-      selector:
-        number:
-          min: 1
-          max: 100
     auto_max_brightness:
-      name: Auto Mode - Max Brightness (%)
+      name: Max Brightness (%)
       default: 100
-      selector:
-        number:
-          min: 1
-          max: 100
     auto_min_temp:
-      name: Auto Mode - Min Kelvin
+      name: Min Kelvin
       default: 2700
-      selector:
-        number:
-          min: 1000
-          max: 8000
     auto_max_temp:
-      name: Auto Mode - Max Kelvin
+      name: Max Kelvin
       default: 5500
-      selector:
-        number:
-          min: 1000
-          max: 8000
     always_on:
       name: Operate 24/7
       default: true
-      selector:
-        boolean:
+      selector: {boolean: }
     time_from:
       name: Start Time
       default: "00:00:00"
-      selector:
-        time:
+      selector: {time: }
     time_to:
       name: End Time
-      default: "00:00:00"
-      selector:
-        time:
+      default: "23:59:59"
+      selector: {time: }
     person_required:
-      name: Require presence?
+      name: Require presence
       default: true
-      selector:
-        boolean:
+      selector: {boolean: }
     person_entity:
       name: Presence Entity
       default: zone.home
-      selector:
-        entity:
-          domain: [zone, person]
+      selector: {entity: {domain: [zone, person]}}
     override_entities:
       name: Override Entities (Emergency switches)
       default: []
@@ -101,10 +78,6 @@ blueprint:
     transition_time:
       name: Transition Time (s)
       default: 3
-      selector:
-        number:
-          min: 0
-          max: 60
 
 mode: restart
 
@@ -116,8 +89,7 @@ trigger:
   - platform: state
     entity_id: !input motion_sensors
     to: "off"
-    for:
-      minutes: !input timeout
+    for: {minutes: !input timeout}
     id: "motion_off"
   - platform: time
     at: !input time_from
@@ -128,59 +100,43 @@ trigger:
 
 action:
   - choose:
+      # 1. Timed Off
       - conditions:
           - condition: trigger
             id: "time_to"
           - condition: template
-            value_template: >
-              {% set always_on = input("always_on") %}
-              {% set override_entities = input("override_entities") %}
-              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {{ not always_on and not is_overridden }}
+            value_template: "{{ not input('always_on') and expand(input('override_entities')) | selectattr('state', 'eq', 'on') | list | count == 0 }}"
         sequence:
           - service: light.turn_off
             target: !input normal_lights
-            data:
-              transition: !input transition_time
+            data: {transition: !input transition_time}
       
+      # 2. Motion Detected (Turn On)
       - conditions:
           - condition: trigger
             id: "motion_on"
           - condition: template
             value_template: >
-              {% set always_on = input("always_on") %}
-              {% set time_from = input("time_from") %}
-              {% set time_to = input("time_to") %}
-              {% set override_entities = input("override_entities") %}
-              {% set person_required = input("person_required") %}
-              {% set person_entity = input("person_entity") %}
-              
-              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {% set is_time = always_on or (now().time() >= time_from | as_timedelta and now().time() <= time_to | as_timedelta) %}
-              {% set person_home = not person_required or states(person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
-              {{ not is_overridden and is_time and person_home }}
+              {% set is_overridden = expand(input('override_entities')) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+              {% set person_home = not input('person_required') or states(input('person_entity')) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
+              {{ not is_overridden and person_home }}
         sequence:
           - service: light.turn_on
             target: !input normal_lights
             data:
               brightness_pct: >
-                {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
-                {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                {% set min_b = input("auto_min_brightness") | int %}
-                {% set max_b = input("auto_max_brightness") | int %}
-                {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
-                {% set normal_brightness = input("normal_brightness") %}
-                {{ auto_b if normal_brightness == 'auto' else normal_brightness | int }}
+                {% set elev = state_attr('sun.sun', 'elevation') | float(0) %}
+                {% set pct = ([ [elev, -10] | max, 20 ] | min + 10) / 30 %}
+                {% set auto_b = (input('auto_min_brightness') | int + pct * (input('auto_max_brightness') | int - input('auto_min_brightness') | int)) | int %}
+                {{ auto_b if input('normal_brightness') == 'auto' else input('normal_brightness') | int }}
               color_temp_kelvin: >
-                {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
-                {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                {% set min_t = input("auto_min_temp") | int %}
-                {% set max_t = input("auto_max_temp") | int %}
-                {% set auto_t = (min_t + elev_pct * (max_t - min_t)) | int %}
-                {% set normal_temp = input("normal_temp") %}
-                {{ auto_t if normal_temp == 'auto' else normal_temp | int }}
+                {% set elev = state_attr('sun.sun', 'elevation') | float(0) %}
+                {% set pct = ([ [elev, -10] | max, 20 ] | min + 10) / 30 %}
+                {% set auto_t = (input('auto_min_temp') | int + pct * (input('auto_max_temp') | int - input('auto_min_temp') | int)) | int %}
+                {{ auto_t if input('normal_temp') == 'auto' else input('normal_temp') | int }}
               transition: !input transition_time
-      
+
+      # 3. No Motion (Ambient Mode or Turn Off)
       - conditions:
           - condition: or
             conditions:
@@ -189,53 +145,20 @@ action:
               - condition: trigger
                 id: "time_from"
           - condition: template
-            value_template: >
-              {% set always_on = input("always_on") %}
-              {% set time_from = input("time_from") %}
-              {% set time_to = input("time_to") %}
-              {% set override_entities = input("override_entities") %}
-              {% set person_required = input("person_required") %}
-              {% set person_entity = input("person_entity") %}
-              
-              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {% set is_time = always_on or (now().time() >= time_from | as_timedelta and now().time() <= time_to | as_timedelta) %}
-              {% set person_home = not person_required or states(person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
-              {{ not is_overridden and is_time and person_home }}
+            value_template: "{{ expand(input('override_entities')) | selectattr('state', 'eq', 'on') | list | count == 0 }}"
         sequence:
           - choose:
               - conditions:
                   - condition: template
-                    value_template: >
-                      {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
-                      {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                      {% set min_b = input("auto_min_brightness") | int %}
-                      {% set max_b = input("auto_max_brightness") | int %}
-                      {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
-                      {% set ambient_brightness = input("ambient_brightness") %}
-                      {{ (ambient_brightness == 'auto' and auto_b == 0) or ambient_brightness | int == 0 }}
+                    value_template: "{{ input('ambient_brightness') | int == 0 }}"
                 sequence:
                   - service: light.turn_off
                     target: !input normal_lights
-                    data:
-                      transition: !input transition_time
+                    data: {transition: !input transition_time}
             default:
               - service: light.turn_on
                 target: !input normal_lights
                 data:
-                  brightness_pct: >
-                    {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
-                    {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                    {% set min_b = input("auto_min_brightness") | int %}
-                    {% set max_b = input("auto_max_brightness") | int %}
-                    {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
-                    {% set ambient_brightness = input("ambient_brightness") %}
-                    {{ auto_b if ambient_brightness == 'auto' else ambient_brightness | int }}
-                  color_temp_kelvin: >
-                    {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
-                    {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                    {% set min_t = input("auto_min_temp") | int %}
-                    {% set max_t = input("auto_max_temp") | int %}
-                    {% set auto_t = (min_t + elev_pct * (max_t - min_t)) | int %}
-                    {% set ambient_temp = input("ambient_temp") %}
-                    {{ auto_t if ambient_temp == 'auto' else ambient_temp | int }}
+                  brightness_pct: "{{ input('ambient_brightness') | int }}"
+                  color_temp_kelvin: "{{ input('ambient_temp') | int }}"
                   transition: !input transition_time
