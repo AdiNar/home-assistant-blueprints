@@ -29,7 +29,9 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
-          device_class: motion
+          device_class:
+            - motion
+            - occupancy
           multiple: true
     timeout:
       name: Timeout (Ambient / Turn Off)
