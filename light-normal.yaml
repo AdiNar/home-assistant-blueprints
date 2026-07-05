@@ -128,8 +128,11 @@ trigger:
 
 action:
   - variables:
-      is_overridden: "{{ expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
-      person_home: "{{ not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] }}"
+      raw_override: !input override_entities
+      raw_person_req: !input person_required
+      raw_person_ent: !input person_entity
+      is_overridden: "{{ expand(raw_override) | selectattr('state', 'eq', 'on') | list | count > 0 }}"
+      person_home: "{{ not raw_person_req or states(raw_person_ent) not in ['0', 'not_home', 'unavailable', 'unknown'] }}"
       sun_elev: "{{ state_attr('sun.sun', 'elevation') | float(0) }}"
       elev_pct: "{{ ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 }}"
       auto_b: "{{ (!input auto_min_brightness | int + elev_pct * (!input auto_max_brightness | int - !input auto_min_brightness | int)) | int }}"
