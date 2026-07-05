@@ -133,8 +133,10 @@ action:
             id: "time_to"
           - condition: template
             value_template: >
-              {% set is_overridden = expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {{ not !input always_on and not is_overridden }}
+              {% set always_on = input("always_on") %}
+              {% set override_entities = input("override_entities") %}
+              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+              {{ not always_on and not is_overridden }}
         sequence:
           - service: light.turn_off
             target: !input normal_lights
@@ -146,9 +148,16 @@ action:
             id: "motion_on"
           - condition: template
             value_template: >
-              {% set is_overridden = expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {% set is_time = !input always_on or (now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta) %}
-              {% set person_home = not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
+              {% set always_on = input("always_on") %}
+              {% set time_from = input("time_from") %}
+              {% set time_to = input("time_to") %}
+              {% set override_entities = input("override_entities") %}
+              {% set person_required = input("person_required") %}
+              {% set person_entity = input("person_entity") %}
+              
+              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+              {% set is_time = always_on or (now().time() >= time_from | as_timedelta and now().time() <= time_to | as_timedelta) %}
+              {% set person_home = not person_required or states(person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
               {{ not is_overridden and is_time and person_home }}
         sequence:
           - service: light.turn_on
@@ -157,15 +166,21 @@ action:
               brightness_pct: >
                 {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
                 {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                {% set auto_b = (!input auto_min_brightness | int + elev_pct * (!input auto_max_brightness | int - !input auto_min_brightness | int)) | int %}
-                {{ auto_b if !input normal_brightness == 'auto' else !input normal_brightness | int }}
+                {% set min_b = input("auto_min_brightness") | int %}
+                {% set max_b = input("auto_max_brightness") | int %}
+                {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
+                {% set normal_brightness = input("normal_brightness") %}
+                {{ auto_b if normal_brightness == 'auto' else normal_brightness | int }}
               color_temp_kelvin: >
                 {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
                 {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                {% set auto_t = (!input auto_min_temp | int + elev_pct * (!input auto_max_temp | int - !input auto_min_temp | int)) | int %}
-                {{ auto_t if !input normal_temp == 'auto' else !input normal_temp | int }}
+                {% set min_t = input("auto_min_temp") | int %}
+                {% set max_t = input("auto_max_temp") | int %}
+                {% set auto_t = (min_t + elev_pct * (max_t - min_t)) | int %}
+                {% set normal_temp = input("normal_temp") %}
+                {{ auto_t if normal_temp == 'auto' else normal_temp | int }}
               transition: !input transition_time
-
+      
       - conditions:
           - condition: or
             conditions:
@@ -175,9 +190,16 @@ action:
                 id: "time_from"
           - condition: template
             value_template: >
-              {% set is_overridden = expand(!input override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
-              {% set is_time = !input always_on or (now().time() >= !input time_from | as_timedelta and now().time() <= !input time_to | as_timedelta) %}
-              {% set person_home = not !input person_required or states(!input person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
+              {% set always_on = input("always_on") %}
+              {% set time_from = input("time_from") %}
+              {% set time_to = input("time_to") %}
+              {% set override_entities = input("override_entities") %}
+              {% set person_required = input("person_required") %}
+              {% set person_entity = input("person_entity") %}
+              
+              {% set is_overridden = expand(override_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+              {% set is_time = always_on or (now().time() >= time_from | as_timedelta and now().time() <= time_to | as_timedelta) %}
+              {% set person_home = not person_required or states(person_entity) not in ['0', 'not_home', 'unavailable', 'unknown'] %}
               {{ not is_overridden and is_time and person_home }}
         sequence:
           - choose:
@@ -186,8 +208,11 @@ action:
                     value_template: >
                       {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
                       {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                      {% set auto_b = (!input auto_min_brightness | int + elev_pct * (!input auto_max_brightness | int - !input auto_min_brightness | int)) | int %}
-                      {{ (!input ambient_brightness == 'auto' and auto_b == 0) or !input ambient_brightness | int == 0 }}
+                      {% set min_b = input("auto_min_brightness") | int %}
+                      {% set max_b = input("auto_max_brightness") | int %}
+                      {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
+                      {% set ambient_brightness = input("ambient_brightness") %}
+                      {{ (ambient_brightness == 'auto' and auto_b == 0) or ambient_brightness | int == 0 }}
                 sequence:
                   - service: light.turn_off
                     target: !input normal_lights
@@ -200,11 +225,17 @@ action:
                   brightness_pct: >
                     {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
                     {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                    {% set auto_b = (!input auto_min_brightness | int + elev_pct * (!input auto_max_brightness | int - !input auto_min_brightness | int)) | int %}
-                    {{ auto_b if !input ambient_brightness == 'auto' else !input ambient_brightness | int }}
+                    {% set min_b = input("auto_min_brightness") | int %}
+                    {% set max_b = input("auto_max_brightness") | int %}
+                    {% set auto_b = (min_b + elev_pct * (max_b - min_b)) | int %}
+                    {% set ambient_brightness = input("ambient_brightness") %}
+                    {{ auto_b if ambient_brightness == 'auto' else ambient_brightness | int }}
                   color_temp_kelvin: >
                     {% set sun_elev = state_attr('sun.sun', 'elevation') | float(0) %}
                     {% set elev_pct = ([ [sun_elev, -10] | max, 20 ] | min + 10) / 30 %}
-                    {% set auto_t = (!input auto_min_temp | int + elev_pct * (!input auto_max_temp | int - !input auto_min_temp | int)) | int %}
-                    {{ auto_t if !input ambient_temp == 'auto' else !input ambient_temp | int }}
+                    {% set min_t = input("auto_min_temp") | int %}
+                    {% set max_t = input("auto_max_temp") | int %}
+                    {% set auto_t = (min_t + elev_pct * (max_t - min_t)) | int %}
+                    {% set ambient_temp = input("ambient_temp") %}
+                    {{ auto_t if ambient_temp == 'auto' else ambient_temp | int }}
                   transition: !input transition_time
